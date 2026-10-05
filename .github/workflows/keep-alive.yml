@@ -1,0 +1,34 @@
+name: Keep Qveno Render service awake
+
+
+
+on:
+
+  schedule:
+  
+    - cron: "*/10 * * * *"
+    
+  workflow_dispatch:
+  
+
+
+jobs:
+
+  ping:
+  
+    runs-on: ubuntu-latest
+    
+    steps:
+    
+      - name: Ping Qveno health endpoint
+      
+        run: curl --fail --silent --show-error --max-time 30 https://qveno.onrender.com/health
+        
+
+
+
+
+
+
+
+
