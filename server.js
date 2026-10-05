@@ -1,17 +1,20 @@
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 const SITES_DIR = path.resolve(__dirname, 'sites');
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-// Keep the public directory explicit and available even on a fresh deployment.
 if (!fs.existsSync(SITES_DIR)) {
   fs.mkdirSync(SITES_DIR, { recursive: true });
 }
@@ -26,7 +29,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*')
 
 app.use(cors({
   origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
-  methods: ['GET', 'HEAD', 'OPTIONS'],
+  methods: ['GET', 'HEAD', 'OPTIONS', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
@@ -36,6 +39,7 @@ app.use(helmet({
 }));
 app.use(compression());
 app.use(morgan(':remote-addr - :method :url :status :res[content-length] - :response-time ms'));
+app.use(express.json({ limit: '100kb' }));
 
 // Reject malformed or unsafe public paths before Express attempts filesystem access.
 app.use((req, res, next) => {
@@ -94,6 +98,78 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
+function apiError(res, status, error) {
+  return res.status(status).json({ success: false, error });
+}
+
+function hasValidApiKey(req) {
+  const configuredKey = process.env.QVENO_UPLOAD_API_KEY;
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!configuredKey || !match) return false;
+
+  const suppliedKey = Buffer.from(match[1]);
+  const expectedKey = Buffer.from(configuredKey);
+  return suppliedKey.length === expectedKey.length
+    && crypto.timingSafeEqual(suppliedKey, expectedKey);
+}
+
+function sanitizeFilename(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 180) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed !== path.basename(trimmed) || /[\\/]/.test(trimmed)) return null;
+  if (trimmed.startsWith('.') || trimmed.includes('..')) return null;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(trimmed)) return null;
+
+  const extension = path.extname(trimmed).toLowerCase();
+  if (extension !== '.html' && extension !== '.htm') return null;
+  return trimmed;
+}
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1, fields: 3 },
+});
+
+app.post('/api/upload', (req, res, next) => {
+  if (!hasValidApiKey(req)) return apiError(res, 401, 'Unauthorized');
+
+  return upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') return apiError(res, 413, 'File too large');
+      return apiError(res, 400, 'Invalid upload');
+    }
+    if (err) return next(err);
+    if (!req.file) return apiError(res, 400, 'A file is required');
+
+    const requestedFilename = req.body.filename || req.file.originalname;
+    const filename = sanitizeFilename(requestedFilename);
+    if (!filename) return apiError(res, 400, 'Invalid file type or filename');
+
+    const filePath = path.resolve(SITES_DIR, filename);
+    if (filePath !== SITES_DIR && !filePath.startsWith(`${SITES_DIR}${path.sep}`)) {
+      return apiError(res, 400, 'Invalid filename');
+    }
+
+    try {
+      fs.writeFileSync(filePath, req.file.buffer, { flag: 'wx', mode: 0o644 });
+    } catch (writeError) {
+      if (writeError.code === 'EEXIST') {
+        return apiError(res, 409, 'A file with this name already exists.');
+      }
+      console.error('Upload error:', writeError.message);
+      return apiError(res, 500, 'Unable to save file');
+    }
+
+    const baseUrl = PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    return res.status(201).json({
+      success: true,
+      filename,
+      url: `${baseUrl}/${encodeURIComponent(filename)}`,
+    });
+  });
+});
+
 const cacheableExtensions = new Set([
   '.css', '.js', '.mjs', '.json', '.png', '.jpg', '.jpeg', '.gif', '.webp',
   '.svg', '.ico', '.mp4', '.mp3', '.woff', '.woff2', '.ttf', '.otf',
@@ -121,7 +197,8 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('Request error:', err.message);
   if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Internal server error' });
+  if (req.path.startsWith('/api/')) return apiError(res, 500, 'Internal server error');
+  return res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, HOST, () => {

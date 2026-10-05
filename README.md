@@ -1,15 +1,19 @@
 # Qveno Hosting Server
 
-A small production-ready Node.js + Express server that publicly serves files placed in the `sites/` directory. It is designed for direct deployment to Render and does not include an upload API, database, or authentication system.
+A Node.js + Express server that publicly serves files from `sites/` and provides a protected HTML upload API for the Qveno main website.
 
-## What it does
+## Features
 
-- Serves every non-hidden file inside `sites/` at the same URL path.
-- Provides a simple server status page at `/`.
-- Provides a JSON health check at `/health`.
-- Returns a JSON 404 response when a file does not exist.
-- Blocks directory traversal, hidden files, and access outside `sites/`.
-- Adds security headers, CORS, compression, request logging, and sensible cache headers.
+- Static hosting from `sites/`
+- Status page at `/`
+- JSON health check at `/health`
+- Authenticated `POST /api/upload` endpoint
+- Only `.html` and `.htm` uploads
+- 10 MB upload limit
+- Safe filename validation and path-traversal protection
+- Duplicate filenames are rejected instead of overwritten
+- CORS, compression, Helmet security headers, and request logging
+- Render-compatible `PORT` and `0.0.0.0` binding
 
 ## Project structure
 
@@ -17,8 +21,13 @@ A small production-ready Node.js + Express server that publicly serves files pla
 qveno-hosting-server/
 ├── server.js
 ├── package.json
+├── package-lock.json
+├── .env.example
 ├── .gitignore
 ├── README.md
+├── .github/
+│   └── workflows/
+│       └── keep-alive.yml
 └── sites/
     └── index.html
 ```
@@ -28,102 +37,109 @@ qveno-hosting-server/
 Requirements: Node.js 18 or newer and npm.
 
 ```bash
-cd qveno-hosting-server
 npm install
-npm start
+QVENO_UPLOAD_API_KEY=replace-with-a-long-random-secret npm start
 ```
 
-The server listens on `http://localhost:3000` locally. You can override the port:
+The server listens on `http://localhost:3000`. Override the port with `PORT=8080` if needed.
+
+## Public routes
+
+- `GET /` — status page
+- `GET /health` — health JSON
+- `GET /index.html` — static file from `sites/index.html`
+- `GET /filename.html` — static file from `sites/filename.html`
+
+## Upload API
+
+### Authentication
+
+Set this environment variable on the server:
+
+```text
+QVENO_UPLOAD_API_KEY=your-long-random-secret
+```
+
+Clients must send it as a Bearer token. Never expose the key in browser JavaScript or commit it to GitHub.
+
+### Request
 
 ```bash
-PORT=8080 npm start
+curl -X POST https://qveno.onrender.com/api/upload \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "file=@portfolio.html" \
+  -F "filename=portfolio.html" \
+  -F "projectName=My Portfolio"
 ```
 
-The server binds to `0.0.0.0`, which is required by Render.
+The `file` field is required. `filename` is optional and defaults to the uploaded file's original name. `projectName` is accepted for client compatibility but is not used as a filesystem path.
 
-## Local URLs
+### Successful response
 
-- Status page: `http://localhost:3000/`
-- Health check: `http://localhost:3000/health`
-- Sample hosted file: `http://localhost:3000/index.html`
+```json
+{
+  "success": true,
+  "filename": "portfolio.html",
+  "url": "https://qveno.onrender.com/portfolio.html"
+}
+```
 
-## Add hosted files
+The returned file is immediately available at the returned URL. A filename that already exists returns HTTP `409` and is never overwritten.
 
-Put files inside `sites/` and preserve the URL path you want. For example:
+### Error responses
+
+```json
+{"success":false,"error":"Unauthorized"}
+```
+
+```json
+{"success":false,"error":"Invalid file type or filename"}
+```
+
+```json
+{"success":false,"error":"File too large"}
+```
+
+The API rejects missing or invalid Bearer tokens, path traversal, absolute paths, hidden files, unsafe characters, non-HTML extensions, files larger than 10 MB, and duplicate filenames.
+
+## CORS
+
+For development, an unset `ALLOWED_ORIGINS` allows all origins. For production, set a comma-separated list of trusted origins:
 
 ```text
-sites/hello.html
-sites/portfolio.html
-sites/css/style.css
-sites/assets/logo.png
+ALLOWED_ORIGINS=https://your-qveno-main-website.example
 ```
 
-They become available at:
+You can optionally set `PUBLIC_BASE_URL=https://qveno.onrender.com` to force a stable public URL. If it is unset, the API builds the URL from the actual request host.
+
+## Render deployment
+
+Render settings:
+
+| Setting | Value |
+|---|---|
+| Environment | Node |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+| Plan | Free or your preferred plan |
+
+In the Render dashboard for the `qveno` service, add these environment variables:
 
 ```text
-http://localhost:3000/hello.html
-http://localhost:3000/portfolio.html
-http://localhost:3000/css/style.css
-http://localhost:3000/assets/logo.png
+QVENO_UPLOAD_API_KEY=<strong-random-secret>
+ALLOWED_ORIGINS=https://your-qveno-main-website.example
+PUBLIC_BASE_URL=https://qveno.onrender.com
 ```
 
-After deployment, replace the local origin with your Render domain:
+Render supplies `PORT` automatically. The server binds to `0.0.0.0`.
 
-```text
-https://YOUR-RENDER-DOMAIN.onrender.com/hello.html
-```
+## Important storage limitation
 
-Only files already present in `sites/` are served. This first version intentionally does not provide a file-upload endpoint.
-
-## CORS configuration
-
-For development, when `ALLOWED_ORIGINS` is not set, all origins are allowed. In production, set a comma-separated list of trusted origins in Render, for example:
-
-```text
-ALLOWED_ORIGINS=https://your-qveno-frontend.example,https://www.example.com
-```
-
-## Deploy to Render
-
-### Option A: deploy from GitHub
-
-1. Create a new GitHub repository, for example `qveno-hosting-server`.
-2. From this project directory, run:
-
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial Qveno hosting server"
-   git branch -M main
-   git remote add origin https://github.com/YOUR-USERNAME/qveno-hosting-server.git
-   git push -u origin main
-   ```
-
-3. In the Render dashboard, choose **New +** → **Web Service**.
-4. Connect the GitHub repository.
-5. Use these settings:
-
-   | Setting | Value |
-   |---|---|
-   | Environment | Node |
-   | Build Command | `npm install` |
-   | Start Command | `npm start` |
-   | Instance type | Your preferred Render plan |
-
-6. Optionally add `ALLOWED_ORIGINS` under **Environment Variables**.
-7. Click **Create Web Service**. Render supplies `PORT` automatically; the server uses it.
-
-### Option B: deploy with Render Blueprint
-
-Create a `render.yaml` in the repository if you want infrastructure-as-code. It is not required for this project; the dashboard settings above are sufficient.
+This implementation writes uploads to the Render service's local `sites/` directory, as required by the initial API specification. Render Free instances have ephemeral filesystems: files can be lost after a service restart, redeploy, or instance replacement. For durable production uploads, replace the disk write with Cloudflare R2, Amazon S3, or another persistent object-storage service.
 
 ## Security notes
 
-- Keep secrets out of the repository; `.env` is ignored by Git.
-- Hidden files and dot-directories are not publicly served.
-- `package.json`, `server.js`, and other project files are outside `sites/` and therefore are not exposed as static content.
-- Do not add an unrestricted upload endpoint without authentication, authorization, file-size limits, and content validation.
-
-## Future API extension
-
-Future routes can be added in separate modules (for example `routes/projects.js` and `routes/uploads.js`) and mounted before the static middleware. Add authentication and authorization before enabling any write operation. The current server remains intentionally read-only.
+- Keep `QVENO_UPLOAD_API_KEY` only in Render and your main website backend environment.
+- Do not call the upload API directly from untrusted browser code with the secret.
+- Route uploads through your main website backend, which authenticates the user and adds the Bearer token server-side.
+- This API intentionally accepts only HTML files; CSS, JavaScript, images, and project bundles are not accepted by this first version.

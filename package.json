@@ -1,7 +1,7 @@
 {
   "name": "qveno-hosting-server",
-  "version": "1.0.0",
-  "description": "Production-ready static hosting server for Qveno, deployable to Render.",
+  "version": "1.1.0",
+  "description": "Production-ready static hosting server and authenticated HTML upload API for Qveno.",
   "private": true,
   "main": "server.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "multer": "^2.4.0"
   }
 }
