@@ -85,6 +85,9 @@ app.get('/', (req, res) => {
     h1 { margin: 0 0 1rem; font-size: clamp(1.7rem, 5vw, 2.3rem); }
     p { margin: .7rem 0; line-height: 1.6; }
     .status { color: #16834b; font-weight: 700; }
+    .copyright { margin-top: 1.6rem; font-size: .95rem; opacity: .8; }
+    .developer-link { display: inline-block; margin-top: .6rem; padding: .7rem 1rem; border-radius: 10px; background: #2563eb; color: #fff; text-decoration: none; font-weight: 700; }
+    .developer-link:hover { background: #1d4ed8; }
     @media (prefers-color-scheme: dark) { body { background: #101522; color: #eef3fb; } main { background: #182033; border-color: #2b3853; } }
   </style>
 </head>
@@ -92,7 +95,8 @@ app.get('/', (req, res) => {
   <main>
     <h1>Qveno Hosting Server</h1>
     <p class="status">Server is online</p>
-    <p>Powered by Node.js + Express</p>
+    <p class="copyright">© mhxmahin copyright all right reserved</p>
+    <a class="developer-link" href="https://mhxmahin.netlify.app/" target="_blank" rel="noopener noreferrer">Developer info</a>
   </main>
 </body>
 </html>`);
